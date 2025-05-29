@@ -1,23 +1,25 @@
-import sys  
-import sqlite3  
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QMessageBox, QHBoxLayout  
+import sys
+import sqlite3
+from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, 
+                            QPushButton, QVBoxLayout, QMessageBox, 
+                            QHBoxLayout)
 from PyQt5.QtGui import QIcon 
 
-from demo_admin_window import AdminScreen  # Импорт окна администратора
-from user_window import UserScreen  # Импорт окна пользователя
+from demo_admin_window import AdminScreen
+from user_window import UserWindow
 
 class AuthApp(QWidget):
     def __init__(self):
         super().__init__()  
-        self.initUI()  
+        self.current_user = None
+        self.initUI()
+        self.init_db()
 
     def initUI(self):
-        # Настройка основного окна
-        self.setWindowTitle('Авторизация')  # Установка заголовка окна
-        self.setWindowIcon(QIcon('icon.png'))  # Установка иконки окна
-        self.setGeometry(100, 100, 400, 300)  # Установка размеров и положения окна
+        self.setWindowTitle('Авторизация (Сетевая версия)')
+        self.setWindowIcon(QIcon('icon.png'))
+        self.setGeometry(100, 100, 400, 300)
 
-        # Внешнее оформление с помощью CSS
         self.setStyleSheet("""
             QWidget { background-color: #f0f0f0; font-family: Arial; }
             QLabel { font-size: 16px; color: #333333; }
@@ -27,80 +29,122 @@ class AuthApp(QWidget):
             QMessageBox { font-size: 14px; }
         """)
 
-        # Основной вертикальный layout
         main_layout = QVBoxLayout()
-        main_layout.addStretch()  
+        main_layout.addStretch()
 
-        # Вертикальный layout для формы авторизации
         form_layout = QVBoxLayout()
 
-        # Создание и настройка виджетов для ввода логина и пароля
-        self.username_label = QLabel('Логин:')  # Надпись для поля логина
-        self.username_input = QLineEdit(self)  # Поле для ввода логина
-        self.username_input.setPlaceholderText('Введите ваш логин')  # Подсказка в поле логина
+        self.username_label = QLabel('Логин:')
+        self.username_input = QLineEdit(self)
+        self.username_input.setPlaceholderText('Введите ваш логин')
 
-        self.password_label = QLabel('Пароль:')  # Надпись для поля пароля
-        self.password_input = QLineEdit(self)  # Поле для ввода пароля
-        self.password_input.setPlaceholderText('Введите ваш пароль')  # Подсказка в поле пароля
-        self.password_input.setEchoMode(QLineEdit.Password)  # Скрытие вводимого пароля
+        self.password_label = QLabel('Пароль:')
+        self.password_input = QLineEdit(self)
+        self.password_input.setPlaceholderText('Введите ваш пароль')
+        self.password_input.setEchoMode(QLineEdit.Password)
 
-        # Кнопка для входа в систему
         self.login_button = QPushButton('Войти', self)
-        self.login_button.clicked.connect(self.check_LogPas)  # Подключение функции проверки логина и пароля
+        self.login_button.clicked.connect(self.check_credentials)
 
-        # Добавление виджетов в форму
         form_layout.addWidget(self.username_label)
         form_layout.addWidget(self.username_input)
         form_layout.addWidget(self.password_label)
         form_layout.addWidget(self.password_input)
         form_layout.addWidget(self.login_button)
 
-        # Горизонтальный layout для центрирования формы
         h_layout = QHBoxLayout()
-        h_layout.addStretch()  # Добавление растягивающего пространства слева
-        h_layout.addLayout(form_layout)  # Добавление формы в центр
-        h_layout.addStretch()  # Добавление растягивающего пространства справа
+        h_layout.addStretch()
+        h_layout.addLayout(form_layout)
+        h_layout.addStretch()
 
-        # Добавление горизонтального layout в основной layout
         main_layout.addLayout(h_layout)
-        main_layout.addStretch()  # Добавление растягивающего пространства внизу
-
-        # Установка основного layout для окна
+        main_layout.addStretch()
         self.setLayout(main_layout)
 
-    def check_LogPas(self):
-        # Получение введенных логина и пароля
+    def init_db(self):
+        """Инициализация централизованной базы данных"""
+        self.conn = sqlite3.connect('//server/share/university_network.db')
+        self.cursor = self.conn.cursor()
+
+        # Создаем таблицы, если их нет
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE,
+                password TEXT,
+                role TEXT,
+                full_name TEXT
+            )
+        ''')
+        
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                course INTEGER DEFAULT 1,
+                created_by INTEGER,
+                FOREIGN KEY(created_by) REFERENCES users(id)
+            )
+        ''')
+        
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS students (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                surname TEXT NOT NULL,
+                name TEXT NOT NULL,
+                middle_name TEXT,
+                group_id INTEGER,
+                is_nonresident BOOLEAN DEFAULT 0,
+                added_by INTEGER,
+                FOREIGN KEY(group_id) REFERENCES groups(id),
+                FOREIGN KEY(added_by) REFERENCES users(id)
+            )
+        ''')
+        
+        self.conn.commit()
+
+    def check_credentials(self):
         username = self.username_input.text()
         password = self.password_input.text()
 
         try:
-            # Подключение к базе данных и проверка учетных данных
-            with sqlite3.connect('user.db') as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT RollesUser FROM polsovatel WHERE username = ? AND password = ?", (username, password))
-                result = cursor.fetchone()  # Получение результата запроса
+            self.cursor.execute('''
+                SELECT id, role, full_name FROM users 
+                WHERE username = ? AND password = ?
+            ''', (username, password))
+
+            result = self.cursor.fetchone()
 
             if result:
-                role = result[0]  # Получение роли пользователя
-                self.show_role_screen(role) 
+                user_id, role, full_name = result
+                self.current_user = {
+                    'id': user_id,
+                    'username': username,
+                    'role': role,
+                    'full_name': full_name
+                }
+                self.show_role_screen(role)
             else:
                 QMessageBox.warning(self, 'Ошибка', 'Неверный логин или пароль')
         except sqlite3.Error as e:
-            # Вывод сообщения об ошибке, если возникла проблема с базой данных
-            QMessageBox.critical(self, 'Ошибка базы данных', f'Произошла ошибка при подключении к базе данных: {e}')
+            QMessageBox.critical(self, 'Ошибка базы данных', 
+                                f'Не удалось подключиться к серверу:\n{str(e)}')
 
-    def show_role_screen(self, role):        # Открытие окна в зависимости от роли пользователя
+    def show_role_screen(self, role):
         if role == 'Admin':
-            self.admin_screen = AdminScreen()  # Создание окна администратора
-            self.admin_screen.show()  # Отображение окна администратора
+            self.admin_screen = AdminScreen(self.current_user, self.conn)
+            self.admin_screen.show()
         elif role == 'User':
-            self.user_screen = UserScreen()  # Создание окна пользователя
-            self.user_screen.show()  # Отображение окна пользователя
-        self.close()  # Закрытие окна авторизации
+            self.user_screen = UserWindow(self.current_user, self.conn)
+            self.user_screen.show()
+        self.hide()  # Скрываем окно авторизации
 
+    def closeEvent(self, event):
+        self.conn.close()
+        event.accept()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)  
     auth_app = AuthApp()  
     auth_app.show()  
-    sys.exit(app.exec_()) 
+    sys.exit(app.exec_())
